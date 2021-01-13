@@ -21,9 +21,9 @@ router.use(cors(reactDevCors));
 
 const createCode = () => {
   let code = '';
-  crypto.randomBytes(6).forEach((byte) => {
-    code += String.fromCharCode((byte % 26) + 65);
-  });
+  for (let i = 0; i < 6; i += 1) {
+    code = code.concat(String.fromCharCode(crypto.randomInt(26) + 65));
+  }
   return code;
 };
 
@@ -43,8 +43,6 @@ const updateStates = (game, playerList = []) => {
 };
 
 router.get('/editions', (req, res) => {
-  console.log(req.sessionID);
-  // rest.restGet(db.findAllEditions, req, res);
   responses.rest(res, db.findAllEditions());
 });
 
@@ -127,17 +125,18 @@ router.put('/player', bp.parseBody(), (req, res) => {
 
 router.put('/games/start', bp.parseBody(), (req, res) => {
   console.log(req.data);
-  const { editions } = req.data;
+  const { editions, cardCount } = req.data;
   const sessionData = gameBySession[req.sessionID];
-  if (sessionData && sessionData.type === 'host') {
+  if (sessionData && sessionData.type === 'host' && typeof cardCount === 'number' && cardCount > 0) {
     const { players } = sessionData.game;
     if (editions.length > 0) {
       if (players.length >= 2) {
         try {
-          sessionData.game.startGame(db.findCardsByEdition(editions));
+          sessionData.game.startGame(db.findCardsByEdition(editions), cardCount);
           updateStates(sessionData.game);
           responses.succeed(res);
         } catch (error) {
+          console.log(`Start error: ${error.message}`);
           responses.customError(res, 500, error.message);
         }
       } else {

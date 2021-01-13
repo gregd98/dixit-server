@@ -1,10 +1,11 @@
 const nanoid = require('nanoid');
+const crypto = require('crypto');
 const network = require('../utils/network');
 
 const shuffle = (array) => {
   const result = array;
   for (let i = result.length; i > 0; i -= 1) {
-    const r = Math.floor(Math.random() * i);
+    const r = crypto.randomInt(i);
     const tmp = result[i - 1];
     result[i - 1] = result[r];
     result[r] = tmp;
@@ -41,13 +42,23 @@ class Game {
           if (this.players.length === 1) {
             this.admin = id;
           }
+          // for (let i = 0; i < 3; i += 1) {
+          //   this.players.push({
+          //     id: nanoid.nanoid(),
+          //     name: `${name} ${i}`,
+          //     hand: [],
+          //     score: { total: 0, lastRound: 0 },
+          //   });
+          // }
           return id;
         }
         throw Error('Name is already in use');
+      } else {
+        throw Error('Maximum player count is reached.');
       }
-      throw Error('Maximum player count is reached.');
+    } else {
+      throw Error('Game is already started');
     }
-    throw Error('Game is already started');
   }
 
   kickPlayer(playerId) {
@@ -101,8 +112,13 @@ class Game {
     return !!this.players.find((player) => player.name === name);
   }
 
-  setDeck(deck) {
-    this.deck = shuffle(deck.map((card) => ({ id: card.id, fileName: card.fileName })));
+  setDeck(deck, cardCount) {
+    if (deck.length > cardCount) {
+      this.deck = shuffle(deck.map((card) => ({ id: card.id, fileName: card.fileName })))
+        .splice(0, cardCount);
+    } else {
+      throw Error('Invalid card count.');
+    }
   }
 
   getColorList() {
@@ -115,22 +131,27 @@ class Game {
     return shuffle(primary).concat(shuffle(secondary));
   }
 
-  setRoundCount() {
-    const n = this.players.length;
-    this.roundCount = Math.floor((this.deck.length - n * 6) / n) + 1;
+  getRoundCount() {
+    const players = this.players.length;
+    const divider = players !== 3 ? players : 5;
+    return Math.floor((this.deck.length - players * this.handSize) / divider + 1);
   }
 
-  startGame(deck) {
+  startGame(deck, cardCount) {
     if (!this.isStarted) {
-      if (this.players.length >= 2) {
-        this.setDeck(deck);
-        this.setRoundCount();
-        if (this.deck.length > this.players.length * 6) {
+      if (this.players.length >= 3) {
+        this.setDeck(deck, cardCount);
+        console.log(deck.length);
+        console.log(this.deck.length);
+        this.handSize = this.players.length !== 3 ? 6 : 7;
+        const roundCount = this.getRoundCount();
+        if (roundCount >= this.players.length) {
+          this.roundCount = roundCount;
           this.players = shuffle(this.players);
           const colors = this.getColorList();
           for (let i = 0; i < this.players.length; i += 1) {
             this.players[i].color = colors[i];
-            for (let j = 0; j < 6; j += 1) {
+            for (let j = 0; j < this.handSize; j += 1) {
               this.players[i].hand.push(this.deck.pop());
             }
           }
@@ -141,7 +162,7 @@ class Game {
             votes: [],
           });
         } else {
-          throw Error('Invalid deck.');
+          throw Error('Invalid card count.');
         }
       } else {
         throw Error('Invalid player count.');
@@ -180,9 +201,16 @@ class Game {
 
   setTable() {
     const round = this.rounds[this.currentRound];
+    let picks = [];
+    if (this.players.length !== 3) {
+      picks = round.pickedCards.map((item) => item.card);
+    } else {
+      round.pickedCards.forEach((item) => {
+        item.cards.forEach((card) => picks.push(card));
+      });
+    }
     const table = [
-      ...round.pickedCards
-        .map((item) => item.card),
+      ...picks,
       round.originalCard,
     ];
     round.table = shuffle(table);
@@ -191,7 +219,16 @@ class Game {
   setScoreBoard() {
     const round = this.rounds[this.currentRound];
     const obj = round.table.map((card) => {
-      const picked = round.pickedCards.find((item) => item.card === card);
+      if (this.players.length !== 3) {
+        const picked = round.pickedCards.find((item) => item.card === card);
+        if (picked) {
+          return { playerId: picked.playerId, card, voteCount: 0 };
+        }
+        return {
+          playerId: this.players[this.currentPlayer].id, card, isOriginal: true, voteCount: 0,
+        };
+      }
+      const picked = round.pickedCards.find((item) => item.cards.includes(card));
       if (picked) {
         return { playerId: picked.playerId, card, voteCount: 0 };
       }
@@ -199,6 +236,8 @@ class Game {
         playerId: this.players[this.currentPlayer].id, card, isOriginal: true, voteCount: 0,
       };
     });
+    console.log('Vote obj');
+    console.log(obj);
     round.votes.forEach((vote) => {
       const voted = obj[vote.vote - 1];
       if (voted.isOriginal) {
@@ -218,15 +257,29 @@ class Game {
         }
       }
     }
+    const mergeResults = (playerId) => {
+      const parts = obj.filter((item) => item.playerId === playerId);
+      if (parts.length === 2) {
+        const [first, second] = parts;
+        return {
+          playerId: first.playerId,
+          isWinner: first.isWinner || second.isWinner,
+          voteCount: first.voteCount + second.voteCount,
+        };
+      }
+      return parts[0];
+    };
+
     for (let i = 0; i < this.players.length; i += 1) {
       const player = this.players[i];
-      const data = obj.find((item) => item.playerId === player.id);
+      const data = this.players.length !== 3 ? obj.find((item) => item.playerId === player.id)
+        : mergeResults(player.id);
       let earned = 0;
       if (data.isWinner) {
         earned += winScore;
       }
       if (!data.isOriginal) {
-        earned += data.voteCount;
+        earned += Math.min(data.voteCount, 3);
       }
       player.score = { total: player.score.total + earned, lastRound: earned };
     }
@@ -282,23 +335,54 @@ class Game {
           if (playerIndex !== -1) {
             const round = this.rounds[this.currentRound];
             const player = this.players[playerIndex];
-            if (!round.pickedCards
-              .find((item) => item.playerId === playerId)) {
+            const playersPick = round.pickedCards.find((item) => item.playerId === playerId);
+            const playerCanPick = () => {
+              if (this.players.length !== 3) {
+                return !playersPick;
+              }
+              if (!playersPick) {
+                return true;
+              }
+              return playersPick.cards.length < 2;
+            };
+            if (playerCanPick()) {
               const cardIndex = player.hand
                 .findIndex((card) => card.id === pickedCard);
               if (cardIndex !== -1) {
-                round.pickedCards.push({
-                  playerId,
-                  card: player.hand[cardIndex],
-                });
+                if (this.players.length !== 3) {
+                  round.pickedCards.push({
+                    playerId,
+                    card: player.hand[cardIndex],
+                  });
+                } else if (playersPick) {
+                  playersPick.cards.push(player.hand[cardIndex]);
+                } else {
+                  round.pickedCards.push({
+                    playerId,
+                    cards: [player.hand[cardIndex]],
+                  });
+                }
                 if (this.deck.length > 0) {
                   player.hand[cardIndex] = this.deck.pop();
                 } else {
-                  console.log(player.hand);
                   player.hand.splice(cardIndex, 1);
-                  console.log(player.hand);
                 }
-                if (round.pickedCards.length === this.players.length - 1) {
+                const everyonePicked = () => {
+                  const playerCount = this.players.length;
+                  if (round.pickedCards.length === playerCount - 1) {
+                    if (this.players.length === 3) {
+                      for (let i = 0; i < round.pickedCards.length; i += 1) {
+                        if (round.pickedCards[i].cards.length !== 2) {
+                          return false;
+                        }
+                      }
+                      return true;
+                    }
+                    return true;
+                  }
+                  return false;
+                };
+                if (everyonePicked()) {
                   this.setTable();
                   this.currentState = 2;
                   console.log(round.table);
@@ -332,9 +416,19 @@ class Game {
         throw Error('Player not exists.');
       } else {
         const round = this.rounds[this.currentRound];
-        const ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
-          .find((item) => item.playerId === playerId).card.id) + 1;
-        if (vote === ownCardIndex || vote < 1 || vote > this.players.length) {
+        let ownCardIndex;
+        if (this.players.length !== 3) {
+          ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
+            .find((item) => item.playerId === playerId).card.id) + 1;
+        } else {
+          ownCardIndex = round.pickedCards
+            .find((item) => item.playerId === playerId).cards
+            .map((card) => card.id).map((id) => round.table
+              .findIndex((card) => card.id === id) + 1);
+        }
+        const isInvalidVote = () => ((this.players.length !== 3 ? vote === ownCardIndex
+          : ownCardIndex.includes(vote)) || vote < 1 || vote > round.table.length);
+        if (isInvalidVote()) {
           throw Error('Invalid vote.');
         } else if (round.votes.find((item) => item.playerId === playerId)) {
           throw Error('Player already voted.');
@@ -370,8 +464,12 @@ class Game {
         case 0:
           return obj;
         case 1:
-          obj.playersPicked = round.pickedCards.map((item) => item.playerId);
-          console.log('State 1');
+          if (this.players.length !== 3) {
+            obj.playersPicked = round.pickedCards.map((item) => item.playerId);
+          } else {
+            obj.playersPicked = round.pickedCards
+              .map((item) => ({ playerId: item.playerId, both: item.cards.length === 2 }));
+          }
           console.log(obj.playersPicked);
           return obj;
         case 2:
@@ -380,8 +478,15 @@ class Game {
           }
           obj.playersVoted = round.votes.map((vote) => vote.playerId);
           if (!isHost && playerId !== this.players[this.currentPlayer].id) {
-            obj.ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
-              .find((item) => item.playerId === playerId).card.id) + 1;
+            if (this.players.length !== 3) {
+              obj.ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
+                .find((item) => item.playerId === playerId).card.id) + 1;
+            } else {
+              obj.ownCardIndex = round.pickedCards
+                .find((item) => item.playerId === playerId).cards
+                .map((card) => card.id).map((id) => round.table
+                  .findIndex((card) => card.id === id) + 1);
+            }
           }
           return obj;
         case 3:
