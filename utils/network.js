@@ -1,6 +1,7 @@
 const { networkInterfaces } = require('os');
 
 const nets = networkInterfaces();
+const interfaces = ['en0', 'Ethernet', 'Wi-Fi'];
 
 exports.getIp = () => {
   const results = {};
@@ -14,13 +15,11 @@ exports.getIp = () => {
       }
     });
   });
-  console.log(results);
-  if (results.en0) {
-    return results.en0[0];
+
+  for (let i = 0; i < interfaces.length; i += 1) {
+    if (results[interfaces[i]]) {
+      return results[interfaces[i]][0];
+    }
   }
-  if (results['Wi-Fi']) {
-    return results['Wi-Fi'][0];
-  }
-  // TODO itt menezni az egyeb interfaceket
   return '';
 };

@@ -186,8 +186,6 @@ class Game {
       }
       if (this.currentRound >= this.roundCount) {
         this.isOver = true;
-        console.log(this);
-        console.log(this.players[0].score);
       }
     } else {
       throw Error('Invalid move.');
