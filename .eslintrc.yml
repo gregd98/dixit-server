@@ -22,6 +22,7 @@ rules:
   no-underscore-dangle: ["error", { "allow": ["_id"] }]
   max-nested-callbacks: ["error", 4]
   max-params: ["error", 8]
+  max-len: ["error", 128]
   max-depth: ["error", 8]
   max-lines-per-function: ["error", 80]
   complexity: ["error", 16]

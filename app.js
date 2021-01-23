@@ -45,10 +45,8 @@ hostNamespace.use((socket, next) => {
     const sid = getSid(cookies);
     const sessionData = gameBySession[sid];
     if (sessionData && sessionData.type === 'host') {
-      console.log('HM - Succeed.');
       next();
     } else {
-      console.log('HM - Error: Invalid sessionID.');
       next(Error('HM - Error: Invalid sessionID.'));
     }
   } catch (error) {
@@ -57,7 +55,6 @@ hostNamespace.use((socket, next) => {
 });
 
 hostNamespace.on('connection', (socket) => {
-  console.log('New host connection');
   const cookies = socket.request.headers.cookie.split(';');
   try {
     const sid = getSid(cookies);
@@ -76,10 +73,8 @@ playerNamespace.use((socket, next) => {
     const sid = getSid(cookies);
     const sessionData = gameBySession[sid];
     if (sessionData && sessionData.type === 'player') {
-      console.log('PM - Succeed.');
       next();
     } else {
-      console.log('PM - Error: Invalid sessionID.');
       next(Error('PM - Error: Invalid sessionID.'));
     }
   } catch (error) {
@@ -89,7 +84,6 @@ playerNamespace.use((socket, next) => {
 });
 
 playerNamespace.on('connection', (socket) => {
-  console.log('New player connection.');
   try {
     const cookies = socket.request.headers.cookie.split(';');
     const sid = getSid(cookies);
@@ -102,9 +96,5 @@ playerNamespace.on('connection', (socket) => {
     console.log(`Error: ${error.message}`);
   }
 });
-
-// db.findCardsByEdition([1, 2]).then((result) => {
-//   console.log(result);
-// });
 
 server.listen(PORT, () => { console.log(`Server listening on port ${PORT}.`); });

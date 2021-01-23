@@ -1,6 +1,5 @@
 const express = require('express'),
   cors = require('cors'),
-  crypto = require('crypto'),
   validate = require('validate.js'),
   { gameBySession, gameByCode } = require('../game/maps'),
   Game = require('../game/game'),
@@ -8,7 +7,8 @@ const express = require('express'),
   bp = require('../middleware/bodyParser'),
   rules = require('../constraints/joinConstraints'),
   responses = require('../utils/responses'),
-  so = require('../utils/socketing');
+  so = require('../utils/socketing'),
+  random = require('../utils/random');
 
 const reactDevCors = {
   origin: 'http://localhost:3000',
@@ -22,25 +22,44 @@ router.use(cors(reactDevCors));
 const createCode = () => {
   let code = '';
   for (let i = 0; i < 6; i += 1) {
-    code = code.concat(String.fromCharCode(crypto.randomInt(26) + 65));
+    code = code.concat(String.fromCharCode(random.getRandomInt(26) + 65));
   }
   return code;
 };
+
+const deepCopy = (value) => JSON.parse(JSON.stringify(value));
 
 const updateStates = (game, playerList = []) => {
   const { players, code } = game;
   const p = playerList.length === 0 ? players : playerList;
   const nsps = '/player';
-  so.getHostNamespace().to(game.code).emit('state update', game.getGameState(true));
-  so.getHostNamespace().to(game.code).emit('player update', game.getPlayerList());
+  so.getHostNamespace().to(code).emit('state update', game.getGameState(true));
+  so.getHostNamespace().to(code).emit('player update', game.getPlayerList());
+  so.getPlayerNamespace().to(code).emit('player update', game.getPlayerList());
   p.forEach((player) => {
-    so.getPlayerNamespace().to(code).emit('player update', game.getPlayerList());
     const sck = so.getIo().nsps[nsps].connected[`${nsps}#${player.socket}`];
     if (sck) {
-      sck.emit('state update', game.getGameState(false, player.id));
+      try {
+        sck.emit('state update', game.getGameState(false, player.id));
+      } catch (error) {
+        console.log(`getGameStateError: ${error.message}`);
+      }
     }
   });
 };
+
+const emitGameDeleted = (gameCode, playerList) => {
+  so.getHostNamespace().to(gameCode).emit('game deleted');
+  const nsps = '/player';
+  playerList.forEach((player) => {
+    const sck = so.getIo().nsps[nsps].connected[`${nsps}#${player.socket}`];
+    if (sck) {
+      sck.emit('game deleted');
+    }
+  });
+};
+
+const getPlayersExcept = (game, playerId) => game.players.filter((player) => player.id !== playerId);
 
 router.get('/editions', (req, res) => {
   responses.rest(res, db.findAllEditions());
@@ -87,6 +106,23 @@ router.put('/games', (req, res) => {
   }
 });
 
+router.delete('/games', (req, res) => {
+  const sessionData = gameBySession[req.sessionID];
+  if (!sessionData || (sessionData.type !== 'host' && sessionData.playerId !== sessionData.game.admin)) {
+    responses.badRequest(res);
+  } else {
+    const playerList = deepCopy(sessionData.game.players);
+    const gameCode = sessionData.game.code;
+    const entries = Object.entries(gameBySession).filter(([_, value]) => value.game === sessionData.game);
+    entries.forEach(([key, _]) => {
+      delete gameBySession[key];
+    });
+    delete gameByCode[gameCode];
+    emitGameDeleted(gameCode, playerList);
+    responses.succeed(res);
+  }
+});
+
 router.put('/player', bp.parseBody(), (req, res) => {
   const { code, name } = req.data;
   if (typeof code !== 'string' || typeof name !== 'string') {
@@ -124,7 +160,6 @@ router.put('/player', bp.parseBody(), (req, res) => {
 });
 
 router.put('/games/start', bp.parseBody(), (req, res) => {
-  console.log(req.data);
   const { editions, cardCount } = req.data;
   const sessionData = gameBySession[req.sessionID];
   if (sessionData && sessionData.type === 'host' && typeof cardCount === 'number' && cardCount > 0) {
@@ -156,8 +191,8 @@ router.put('/games/pick', bp.parseBody(), (req, res) => {
   if (sessionData && sessionData.type === 'player' && Number.isInteger(pickedCard)) {
     try {
       sessionData.game.pickCard(pickedCard, sessionData.playerId);
-      updateStates(sessionData.game);
-      responses.succeed(res);
+      updateStates(sessionData.game, getPlayersExcept(sessionData.game, sessionData.playerId));
+      responses.rest(res, sessionData.game.getGameState(false, sessionData.playerId));
     } catch (error) {
       console.log(`Pick error: ${error.message}`);
       responses.customError(res, 400, error.message);
@@ -170,11 +205,21 @@ router.put('/games/pick', bp.parseBody(), (req, res) => {
 router.put('/games/vote', bp.parseBody(), (req, res) => {
   const { vote } = req.data;
   const sessionData = gameBySession[req.sessionID];
-  if (sessionData && sessionData.type === 'player' && Number.isInteger(vote)) {
+  const succeed = () => {
+    updateStates(sessionData.game, getPlayersExcept(sessionData.game, sessionData.playerId));
+    responses.rest(res, sessionData.game.getGameState(false, sessionData.playerId));
+  };
+  if (sessionData && sessionData.type === 'player') {
     try {
-      sessionData.game.vote(sessionData.playerId, vote);
-      updateStates(sessionData.game);
-      responses.succeed(res);
+      if (Number.isInteger(vote)) {
+        sessionData.game.vote(sessionData.playerId, vote);
+        succeed();
+      } else if (vote === 'done') {
+        sessionData.game.voteDone(sessionData.playerId);
+        succeed();
+      } else {
+        responses.badRequest(res);
+      }
     } catch (error) {
       console.log(`Vote error: ${error.message}`);
       responses.customError(res, 400, error.message);
@@ -186,11 +231,12 @@ router.put('/games/vote', bp.parseBody(), (req, res) => {
 
 router.put('/games/next', (req, res) => {
   const sessionData = gameBySession[req.sessionID];
-  if (sessionData && sessionData.type === 'player' && sessionData.game.getPlayerList().find((player) => player.id === sessionData.playerId && player.isAdmin)) {
+  if (sessionData && sessionData.type === 'player' && sessionData.game.getPlayerList()
+    .find((player) => player.id === sessionData.playerId && player.isAdmin)) {
     try {
       sessionData.game.setNextRound();
-      updateStates(sessionData.game);
-      responses.succeed(res);
+      updateStates(sessionData.game, getPlayersExcept(sessionData.game, sessionData.playerId));
+      responses.rest(res, sessionData.game.getGameState(false, sessionData.playerId));
     } catch (error) {
       console.log('NextRound error.');
       responses.customError(res, 400, error.message);
@@ -216,7 +262,7 @@ router.put('/games/kick', bp.parseBody(), (req, res) => {
         if (!entry[0]) {
           responses.badRequest(res);
         } else {
-          delete gameBySession[entry.key];
+          delete gameBySession[entry[0]];
           updateStates(sessionData.game, playerList);
           responses.succeed(res);
         }
@@ -243,6 +289,22 @@ router.put('/games/admin', bp.parseBody(), (req, res) => {
     } catch (error) {
       console.log(`setAdmin error: ${error.message}`);
       responses.customError(res, 400, error.message);
+    }
+  }
+});
+
+router.put('/games/reset', (req, res) => {
+  const sessionData = gameBySession[req.sessionID];
+  if (!sessionData || sessionData.game.admin !== sessionData.playerId) {
+    responses.badRequest(res);
+  } else {
+    try {
+      sessionData.game.resetGame();
+      updateStates(sessionData.game, getPlayersExcept(sessionData.game, sessionData.playerId));
+      responses.rest(res, sessionData.game.getGameState(false, sessionData.playerId));
+    } catch (error) {
+      console.log(`Reset error: ${error.message}`);
+      responses.customError(res, 400, `Reset error: ${error.message}`);
     }
   }
 });

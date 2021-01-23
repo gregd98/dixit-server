@@ -14,11 +14,13 @@ exports.getIp = () => {
       }
     });
   });
+  console.log(results);
   if (results.en0) {
     return results.en0[0];
   }
   if (results['Wi-Fi']) {
     return results['Wi-Fi'][0];
   }
+  // TODO itt menezni az egyeb interfaceket
   return '';
 };

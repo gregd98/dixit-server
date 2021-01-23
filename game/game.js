@@ -1,17 +1,6 @@
 const nanoid = require('nanoid');
-const crypto = require('crypto');
 const network = require('../utils/network');
-
-const shuffle = (array) => {
-  const result = array;
-  for (let i = result.length; i > 0; i -= 1) {
-    const r = crypto.randomInt(i);
-    const tmp = result[i - 1];
-    result[i - 1] = result[r];
-    result[r] = tmp;
-  }
-  return result;
-};
+const random = require('../utils/random');
 
 class Game {
   constructor(code) {
@@ -25,10 +14,27 @@ class Game {
     this.rounds = [];
     this.currentState = 0;
     this.currentPlayer = 0;
-    this.cardCount = 0;
     this.roundCount = 0;
     this.deck = [];
-    this.scores = [];
+  }
+
+  resetGame() {
+    if (!this.isOver) {
+      throw Error('Invalid action.');
+    } else {
+      this.isStarted = false;
+      this.isOver = false;
+      this.currentRound = 0;
+      this.rounds = [];
+      this.currentState = 0;
+      this.currentPlayer = 0;
+      this.roundCount = 0;
+      this.deck = [];
+      for (let i = 0; i < this.players.length; i += 1) {
+        this.players[i].hand = [];
+        this.players[i].score = { total: 0, lastRound: 0 };
+      }
+    }
   }
 
   addPlayer(name) {
@@ -42,14 +48,6 @@ class Game {
           if (this.players.length === 1) {
             this.admin = id;
           }
-          // for (let i = 0; i < 3; i += 1) {
-          //   this.players.push({
-          //     id: nanoid.nanoid(),
-          //     name: `${name} ${i}`,
-          //     hand: [],
-          //     score: { total: 0, lastRound: 0 },
-          //   });
-          // }
           return id;
         }
         throw Error('Name is already in use');
@@ -113,8 +111,8 @@ class Game {
   }
 
   setDeck(deck, cardCount) {
-    if (deck.length > cardCount) {
-      this.deck = shuffle(deck.map((card) => ({ id: card.id, fileName: card.fileName })))
+    if (deck.length >= cardCount) {
+      this.deck = random.shuffle(deck.map((card) => ({ id: card.id, fileName: card.fileName })))
         .splice(0, cardCount);
     } else {
       throw Error('Invalid card count.');
@@ -128,7 +126,7 @@ class Game {
       primary.push(i);
       secondary.push(i + 6);
     }
-    return shuffle(primary).concat(shuffle(secondary));
+    return random.shuffle(primary).concat(random.shuffle(secondary));
   }
 
   getRoundCount() {
@@ -141,13 +139,11 @@ class Game {
     if (!this.isStarted) {
       if (this.players.length >= 3) {
         this.setDeck(deck, cardCount);
-        console.log(deck.length);
-        console.log(this.deck.length);
         this.handSize = this.players.length !== 3 ? 6 : 7;
         const roundCount = this.getRoundCount();
         if (roundCount >= this.players.length) {
           this.roundCount = roundCount;
-          this.players = shuffle(this.players);
+          this.players = random.shuffle(this.players);
           const colors = this.getColorList();
           for (let i = 0; i < this.players.length; i += 1) {
             this.players[i].color = colors[i];
@@ -160,6 +156,7 @@ class Game {
             currentPlayerId: this.players[this.currentPlayer].id,
             pickedCards: [],
             votes: [],
+            ownCardIndex: [],
           });
         } else {
           throw Error('Invalid card count.');
@@ -179,6 +176,7 @@ class Game {
         currentPlayerId: this.players[this.currentPlayer].id,
         pickedCards: [],
         votes: [],
+        ownCardIndex: [],
       });
       this.currentRound += 1;
       if (this.currentPlayer === this.players.length - 1) {
@@ -188,15 +186,12 @@ class Game {
       }
       if (this.currentRound >= this.roundCount) {
         this.isOver = true;
+        console.log(this);
+        console.log(this.players[0].score);
       }
-      console.log(`Round: ${this.currentRound + 1}/${this.roundCount}`);
     } else {
       throw Error('Invalid move.');
     }
-  }
-
-  setCardCount(cardCount) {
-    this.cardCount = cardCount;
   }
 
   setTable() {
@@ -213,7 +208,7 @@ class Game {
       ...picks,
       round.originalCard,
     ];
-    round.table = shuffle(table);
+    round.table = random.shuffle(table);
   }
 
   setScoreBoard() {
@@ -236,14 +231,26 @@ class Game {
         playerId: this.players[this.currentPlayer].id, card, isOriginal: true, voteCount: 0,
       };
     });
-    console.log('Vote obj');
-    console.log(obj);
     round.votes.forEach((vote) => {
-      const voted = obj[vote.vote - 1];
-      if (voted.isOriginal) {
-        obj.find((item) => item.playerId === vote.playerId).isWinner = true;
+      if (this.players.length < 7) {
+        const voted = obj[vote.vote - 1];
+        if (voted.isOriginal) {
+          obj.find((item) => item.playerId === vote.playerId).isWinner = true;
+        }
+        voted.voteCount += 1;
+      } else {
+        const votes = obj.filter((_, i) => vote.votes.includes(i + 1));
+        if (votes.find((item) => item.isOriginal === true)) {
+          const p = obj.find((item) => item.playerId === vote.playerId);
+          p.isWinner = true;
+          if (votes.length === 1) {
+            p.singleVote = true;
+          }
+        }
+        for (let i = 0; i < votes.length; i += 1) {
+          votes[i].voteCount += 1;
+        }
       }
-      voted.voteCount += 1;
     });
     let winScore = 2;
     const original = obj.find((item) => item.isOriginal === true);
@@ -281,9 +288,11 @@ class Game {
       if (!data.isOriginal) {
         earned += Math.min(data.voteCount, 3);
       }
+      if (data.singleVote) {
+        earned += 1;
+      }
       player.score = { total: player.score.total + earned, lastRound: earned };
     }
-    console.log(this.players.map((player) => ({ name: player.name, score: player.score })));
   }
 
   getGameInfo(isHost, playerId = null) {
@@ -304,6 +313,25 @@ class Game {
     return obj;
   }
 
+  setOwnCards() {
+    const round = this.rounds[this.currentRound];
+    this.players.filter((player) => player.id !== this.players[this.currentPlayer].id).forEach((player) => {
+      if (this.players.length !== 3) {
+        const oci = round.table.findIndex((card) => card.id === round.pickedCards
+          .find((item) => item.playerId === player.id).card.id) + 1;
+        if (this.players.length < 7) {
+          round.ownCardIndex.push({ playerId: player.id, ownCardIndex: oci });
+        } else {
+          round.ownCardIndex.push({ playerId: player.id, ownCardIndex: [oci] });
+        }
+      } else {
+        const oci = round.pickedCards.find((item) => item.playerId === player.id).cards
+          .map((card) => card.id).map((id) => round.table.findIndex((card) => card.id === id) + 1);
+        round.ownCardIndex.push({ playerId: player.id, ownCardIndex: oci });
+      }
+    });
+  }
+
   pickCard(pickedCard, playerId) {
     switch (this.currentState) {
       case 0:
@@ -316,10 +344,8 @@ class Game {
             if (this.deck.length > 0) {
               this.players[this.currentPlayer].hand[cardIndex] = this.deck.pop();
             } else {
-              console.log(this.players[this.currentPlayer].hand);
               this.players[this.currentPlayer].hand
                 .splice(cardIndex, 1);
-              console.log(this.players[this.currentPlayer].hand);
             }
             this.currentState = 1;
           } else {
@@ -376,7 +402,6 @@ class Game {
                           return false;
                         }
                       }
-                      return true;
                     }
                     return true;
                   }
@@ -384,8 +409,8 @@ class Game {
                 };
                 if (everyonePicked()) {
                   this.setTable();
+                  this.setOwnCards();
                   this.currentState = 2;
-                  console.log(round.table);
                 }
               } else {
                 throw Error('Invalid card.');
@@ -405,6 +430,29 @@ class Game {
     }
   }
 
+  voteDone(playerId) {
+    if (this.currentState !== 2 || this.players.length < 7 || playerId === this.players[this.currentPlayer].id) {
+      throw Error('Invalid move.');
+    } else if (!this.players.find((item) => item.id === playerId)) {
+      throw Error('Player not exists.');
+    } else {
+      const round = this.rounds[this.currentRound];
+      const playersVote = round.votes.find((item) => item.playerId === playerId);
+      if (!playersVote || playersVote.votes.length === 2) {
+        throw Error('Invalid move.');
+      } else {
+        playersVote.done = true;
+        if (round.votes.filter((item) => item.done === true).length
+            === this.players.length - 1) {
+          console.log('Votes');
+          console.log(round.votes);
+          this.setScoreBoard();
+          this.currentState = 3;
+        }
+      }
+    }
+  }
+
   vote(playerId, vote) {
     if (this.currentState !== 2) {
       throw Error('Invalid move.');
@@ -416,27 +464,39 @@ class Game {
         throw Error('Player not exists.');
       } else {
         const round = this.rounds[this.currentRound];
-        let ownCardIndex;
-        if (this.players.length !== 3) {
-          ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
-            .find((item) => item.playerId === playerId).card.id) + 1;
-        } else {
-          ownCardIndex = round.pickedCards
-            .find((item) => item.playerId === playerId).cards
-            .map((card) => card.id).map((id) => round.table
-              .findIndex((card) => card.id === id) + 1);
-        }
-        const isInvalidVote = () => ((this.players.length !== 3 ? vote === ownCardIndex
-          : ownCardIndex.includes(vote)) || vote < 1 || vote > round.table.length);
+        const { ownCardIndex } = round.ownCardIndex.find((item) => item.playerId === playerId);
+        const isInvalidVote = () => ((this.players.length === 3  || this.players.length >= 7
+          ? ownCardIndex.includes(vote) : vote === ownCardIndex) || vote < 1
+          || vote > round.table.length);
         if (isInvalidVote()) {
           throw Error('Invalid vote.');
-        } else if (round.votes.find((item) => item.playerId === playerId)) {
-          throw Error('Player already voted.');
+        } else if (this.players.length < 7) {
+          if (round.votes.find((item) => item.playerId === playerId)) {
+            throw Error('Player already voted.');
+          } else {
+            round.votes.push({ playerId, vote });
+            if (round.votes.length === this.players.length - 1) {
+              this.setScoreBoard();
+              this.currentState = 3;
+            }
+          }
         } else {
-          round.votes.push({ playerId, vote });
-          if (round.votes.length === this.players.length - 1) {
-            this.setScoreBoard();
-            this.currentState = 3;
+          const playersVote = round.votes.find((item) => item.playerId === playerId);
+          if (playersVote && playersVote.done) {
+            throw Error('Player already voted.');
+          } else if (playersVote) {
+            playersVote.votes.push(vote);
+            playersVote.done = true;
+            if (round.votes.filter((item) => item.done === true).length
+                === this.players.length - 1) {
+              console.log('Votes');
+              console.log(round.votes);
+              this.setScoreBoard();
+              this.currentState = 3;
+            }
+          } else {
+            ownCardIndex.push(vote);
+            round.votes.push({ playerId, votes: [vote], done: false });
           }
         }
       }
@@ -458,6 +518,8 @@ class Game {
         obj.currentPlayer = this.players[this.currentPlayer].id;
         if (!isHost) {
           obj.hand = this.players.find((player) => player.id === playerId).hand;
+        } else {
+          obj.rounds = { current: this.currentRound + 1, total: this.roundCount };
         }
       }
       switch (this.currentState) {
@@ -470,23 +532,18 @@ class Game {
             obj.playersPicked = round.pickedCards
               .map((item) => ({ playerId: item.playerId, both: item.cards.length === 2 }));
           }
-          console.log(obj.playersPicked);
           return obj;
         case 2:
           if (isHost) {
             obj.table = round.table;
           }
-          obj.playersVoted = round.votes.map((vote) => vote.playerId);
+          if (this.players.length < 7) {
+            obj.playersVoted = round.votes.map((vote) => vote.playerId);
+          } else {
+            obj.playersVoted = round.votes.map((vote) => ({ playerId: vote.playerId, done: vote.done }));
+          }
           if (!isHost && playerId !== this.players[this.currentPlayer].id) {
-            if (this.players.length !== 3) {
-              obj.ownCardIndex = round.table.findIndex((card) => card.id === round.pickedCards
-                .find((item) => item.playerId === playerId).card.id) + 1;
-            } else {
-              obj.ownCardIndex = round.pickedCards
-                .find((item) => item.playerId === playerId).cards
-                .map((card) => card.id).map((id) => round.table
-                  .findIndex((card) => card.id === id) + 1);
-            }
+            obj.ownCardIndex = round.ownCardIndex.find((item) => item.playerId === playerId).ownCardIndex;
           }
           return obj;
         case 3:

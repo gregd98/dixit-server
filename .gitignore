@@ -82,3 +82,10 @@ typings/
 # WebStorm project files
 .idea/
 public
+
+tester.js
+builder.js
+
+/*-linux
+/*-macos
+/*.exe
