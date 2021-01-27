@@ -442,8 +442,6 @@ class Game {
         playersVote.done = true;
         if (round.votes.filter((item) => item.done === true).length
             === this.players.length - 1) {
-          console.log('Votes');
-          console.log(round.votes);
           this.setScoreBoard();
           this.currentState = 3;
         }
@@ -487,8 +485,6 @@ class Game {
             playersVote.done = true;
             if (round.votes.filter((item) => item.done === true).length
                 === this.players.length - 1) {
-              console.log('Votes');
-              console.log(round.votes);
               this.setScoreBoard();
               this.currentState = 3;
             }
