@@ -11,8 +11,8 @@ One device hosting (laptop or TV), the players join with their phones. (browser,
 ## Client
 Directory **public/** contains the client application, builded by [dixit-client](https://github.com/gregd98/dixit-client).
 ## Screenshots
-![Lobby](screenshots/lobby.PNG)
-![Hand](screenshots/hand.PNG)
-![Deck](screenshots/deck.PNG)
-![Vote](screenshots/vote.PNG)
-![Scores](screenshots/scores.PNG)
+![Lobby](screenshots/lobby.png)
+![Hand](screenshots/hand.png)
+![Deck](screenshots/deck.png)
+![Vote](screenshots/vote.png)
+![Scores](screenshots/scores.png)
