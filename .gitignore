@@ -81,6 +81,7 @@ typings/
 
 # WebStorm project files
 .idea/
+build
 
 tester.js
 
